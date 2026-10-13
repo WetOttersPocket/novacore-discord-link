@@ -1,0 +1,39 @@
+<!doctype html>
+<!-- NovaCore Discord link page (preview.166). Static, no secrets. Hosted on GitHub Pages.
+     Flow: Nova shows a QR -> this page (?s=<state>&p=<presence server>) -> Discord OAuth2 (identify, PKCE)
+     -> back here with ?code -> page posts code + verifier to the presence service, which keeps only your Discord id + name. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer"><title>Link Discord to NovaCore</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#05080f;color:#e8eef5;font:16px/1.5 system-ui,sans-serif}
+main{max-width:420px;padding:28px;margin:16px;border-radius:22px;background:#0d1522;box-shadow:0 0 0 1px #1d2a3a}
+h1{font-size:22px;margin:0 0 8px}p{color:#9fb0c2}button{width:100%;padding:14px;border:0;border-radius:14px;background:#5865f2;color:#fff;font-size:17px;font-weight:600}
+.ok{color:#5be3a0}.err{color:#ff7a7a}small{color:#6c7d8f}</style></head>
+<body><main><h1>Link Discord to NovaCore</h1><p id="msg">Preparing...</p><button id="go" hidden>Continue with Discord</button>
+<p><small>NovaCore asks only for the <b>identify</b> scope. Your Discord ID and name are stored against your Nova friend code; no password or token is kept.</small></p></main>
+<script>
+const CLIENT_ID='1558983913588662342';
+const REDIRECT=location.origin+location.pathname; // must match the redirect registered in the Discord developer portal exactly
+const $=id=>document.getElementById(id),msg=(t,c='')=>{$('msg').textContent=t;$('msg').className=c};
+const b64u=buf=>btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+const q=new URLSearchParams(location.search);
+async function begin(){
+  const s=q.get('s'),p=q.get('p');
+  if(!s||!/^[A-Za-z0-9_-]{16,64}$/.test(s)||!p||!/^https:\/\//.test(p)){msg('Open this page by scanning the QR code in NovaCore (Quick menu > Friends > Link Discord).','err');return}
+  const verifier=b64u(crypto.getRandomValues(new Uint8Array(48)));
+  const challenge=b64u(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier)));
+  sessionStorage.setItem('nova-link',JSON.stringify({s,p,verifier}));
+  msg('Tap below, approve on Discord, then come back here automatically.');$('go').hidden=false;
+  $('go').onclick=()=>{location.href='https://discord.com/oauth2/authorize?'+new URLSearchParams({client_id:CLIENT_ID,response_type:'code',redirect_uri:REDIRECT,scope:'identify',state:s,code_challenge:challenge,code_challenge_method:'S256',prompt:'consent'})};
+}
+async function finish(){
+  const saved=JSON.parse(sessionStorage.getItem('nova-link')||'null');sessionStorage.removeItem('nova-link');history.replaceState(null,'',REDIRECT);
+  if(q.get('error')){msg('Discord linking was cancelled.','err');return}
+  if(!saved||saved.s!==q.get('state')){msg('This link session expired or was opened in another browser. Scan the QR in NovaCore again.','err');return}
+  msg('Linking...');
+  try{const r=await fetch(saved.p.replace(/\/+$/,'')+'/v1/link/complete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({state:saved.s,code:q.get('code'),verifier:saved.verifier})});
+    const o=await r.json();if(r.ok&&o.ok)msg('Linked as '+o.name+'. NovaCore will show it within a minute; you can close this page.','ok');
+    else msg('Linking failed ('+(o.error||r.status)+'). Scan the QR in NovaCore again.','err');
+  }catch{msg('Could not reach your Nova presence service. Is the tunnel running?','err')}
+}
+(q.get('code')||q.get('error'))?finish():begin();
+</script></body></html>
